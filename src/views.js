@@ -31,7 +31,7 @@ function layout({ title, body, navigation = false }) {
   <meta name="color-scheme" content="light">
   <meta name="robots" content="noindex,nofollow,noarchive">
   <title>${escapeHtml(title)} · Secret Spark</title>
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/style.css?v=20260902-1">
   <script src="/app.js" defer></script>
 </head>
 <body>
