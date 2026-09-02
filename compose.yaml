@@ -1,7 +1,9 @@
 services:
   app:
     build: .
-    restart: unless-stopped
+    restart: always
+    expose:
+      - "3000"
     environment:
       PORT: "3000"
       DATA_DIR: /data
@@ -11,33 +13,17 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
       TIME_ZONE: ${TIME_ZONE:-Europe/Moscow}
       DEFAULT_TTL: ${DEFAULT_TTL:-86400}
+      VIRTUAL_HOST: ${DOMAIN:?Set DOMAIN in .env}
+      VIRTUAL_PORT: "3000"
+      LETSENCRYPT_HOST: ${DOMAIN:?Set DOMAIN in .env}
     volumes:
       - secret_data:/data
     networks:
-      - private
-
-  caddy:
-    image: caddy:2.10-alpine
-    restart: unless-stopped
-    depends_on:
-      - app
-    environment:
-      DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    networks:
-      - private
+      - proxy-net
 
 networks:
-  private:
+  proxy-net:
+    external: true
 
 volumes:
   secret_data:
-  caddy_data:
-  caddy_config:
