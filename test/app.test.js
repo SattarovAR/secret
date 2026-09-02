@@ -74,6 +74,29 @@ test('creation and audit require administrator credentials', async () => {
     body: new URLSearchParams({ secret: 'must not be stored', ttl: '3600' }),
   });
   assert.equal(crossSite.status, 403);
+
+  const opaqueSameOrigin = await fetch(`${origin}/create`, {
+    method: 'POST',
+    headers: {
+      Authorization: auth,
+      Origin: 'null',
+      'Sec-Fetch-Site': 'same-origin',
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({ secret: 'valid browser submission', ttl: '3600' }),
+  });
+  assert.equal(opaqueSameOrigin.status, 201);
+
+  const malformedOrigin = await fetch(`${origin}/create`, {
+    method: 'POST',
+    headers: {
+      Authorization: auth,
+      Origin: 'not a URL',
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({ secret: 'must not be stored', ttl: '3600' }),
+  });
+  assert.equal(malformedOrigin.status, 403);
 });
 
 test('a secret is revealed exactly once and audit records the read', async () => {

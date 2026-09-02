@@ -117,7 +117,17 @@ export function createApp({
       if (request.method === 'POST') {
         const fetchSite = request.headers['sec-fetch-site'];
         const origin = request.headers.origin;
-        if (fetchSite === 'cross-site' || (origin && new URL(origin).origin !== expectedOrigin)) {
+        let unsafeOrigin = false;
+        if (origin === 'null') {
+          unsafeOrigin = fetchSite !== 'same-origin';
+        } else if (origin) {
+          try {
+            unsafeOrigin = new URL(origin).origin !== expectedOrigin;
+          } catch {
+            unsafeOrigin = true;
+          }
+        }
+        if (fetchSite === 'cross-site' || unsafeOrigin) {
           return send(response, 403, errorView('Запрос с другого сайта заблокирован.'));
         }
       }
