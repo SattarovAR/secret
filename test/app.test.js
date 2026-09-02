@@ -38,11 +38,12 @@ after(async () => {
   rmSync(workingDir, { recursive: true, force: true });
 });
 
-async function createSecret(value, ttl = 86400) {
+async function createSecret(value, ttl = 86400, requestHeaders = {}) {
   const response = await fetch(`${origin}/create`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
+      ...requestHeaders,
     },
     body: new URLSearchParams({ secret: value, ttl: String(ttl) }),
   });
@@ -110,15 +111,31 @@ test('creation is public while audit remains administrator-only', async () => {
 
 test('a secret is revealed exactly once and audit records the read', async () => {
   const secretText = 'temporary API key: test-only-value';
-  const { secretPath } = await createSecret(secretText);
+  const { secretPath } = await createSecret(secretText, 86400, {
+    'X-Real-IP': '203.0.113.10',
+    'User-Agent': 'Creator Browser/1.0',
+    'Accept-Language': 'ru-RU,ru;q=0.9',
+  });
 
-  const preview = await fetch(`${origin}${secretPath}`);
+  const preview = await fetch(`${origin}${secretPath}`, {
+    headers: {
+      'X-Real-IP': '203.0.113.20',
+      'User-Agent': 'TelegramBot (like TwitterBot)',
+      Referer: 'https://t.me/company-chat/message',
+    },
+  });
   assert.equal(preview.status, 200);
   const previewHtml = await preview.text();
   assert.match(previewHtml, /Показать секрет/);
   assert.doesNotMatch(previewHtml, /test-only-value/);
 
-  const first = await fetch(`${origin}${secretPath}/reveal`, { method: 'POST' });
+  const first = await fetch(`${origin}${secretPath}/reveal`, {
+    method: 'POST',
+    headers: {
+      'X-Real-IP': '203.0.113.21',
+      'User-Agent': 'Recipient Browser/2.0',
+    },
+  });
   assert.equal(first.status, 200);
   assert.match(await first.text(), /test-only-value/);
 
@@ -130,6 +147,18 @@ test('a secret is revealed exactly once and audit records the read', async () =>
   const auditHtml = await audit.text();
   assert.match(auditHtml, /Прочитана/);
   assert.match(auditHtml, /2 сент. 2026/);
+  assert.match(auditHtml, /Создана/);
+  assert.match(auditHtml, /Страница запрошена/);
+  assert.match(auditHtml, /Секрет раскрыт/);
+  assert.match(auditHtml, /203\.0\.113\.10/);
+  assert.match(auditHtml, /203\.0\.113\.20/);
+  assert.match(auditHtml, /203\.0\.113\.21/);
+  assert.match(auditHtml, /Creator Browser\/1\.0/);
+  assert.match(auditHtml, /TelegramBot/);
+  assert.match(auditHtml, /Recipient Browser\/2\.0/);
+  assert.match(auditHtml, /ru-RU,ru;q=0\.9/);
+  assert.match(auditHtml, /https:\/\/t\.me/);
+  assert.doesNotMatch(auditHtml, /test-only-value/);
 });
 
 test('an active secret can be deleted before it is read', async () => {
@@ -145,7 +174,11 @@ test('an active secret can be deleted before it is read', async () => {
 
   const deletion = await fetch(`${origin}${managePath}/delete`, {
     method: 'POST',
-    headers: { Authorization: auth },
+    headers: {
+      Authorization: auth,
+      'X-Real-IP': '203.0.113.30',
+      'User-Agent': 'Administrator Browser/3.0',
+    },
     redirect: 'manual',
   });
   assert.equal(deletion.status, 303);
@@ -153,6 +186,11 @@ test('an active secret can be deleted before it is read', async () => {
   const secret = await fetch(`${origin}${secretPath}`);
   assert.equal(secret.status, 410);
   assert.match(await secret.text(), /Ссылка отозвана/);
+
+  const audit = await fetch(`${origin}/audit`, { headers: { Authorization: auth } });
+  const auditHtml = await audit.text();
+  assert.match(auditHtml, /203\.0\.113\.30/);
+  assert.match(auditHtml, /Administrator Browser\/3\.0/);
 });
 
 test('an unread secret expires and its content becomes unavailable', async () => {

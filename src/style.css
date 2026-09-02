@@ -87,6 +87,17 @@ code { color: var(--purple); font-weight: 800; }
 .small { padding: 7px 10px; border-radius: 9px; font-size: 12px; }
 .empty-table { padding: 60px 20px; text-align: center; color: var(--muted); }
 .page-notice { margin-bottom: 18px; }
+.events-row td { padding: 0 16px 16px; white-space: normal; background: #fff; }
+.event-details { border: 1px solid var(--line); border-radius: 13px; background: #fbfaff; }
+.event-details summary { padding: 11px 14px; color: var(--purple); font-weight: 800; cursor: pointer; user-select: none; }
+.event-list { display: grid; gap: 9px; margin: 0; padding: 0 12px 12px; list-style: none; }
+.event-list li { padding: 12px; border-radius: 11px; background: white; border: 1px solid #eeeaf6; }
+.event-main { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 8px; }
+.event-main strong { color: var(--ink); }
+.event-main time { color: var(--muted); font-size: 12px; }
+.event-meta { display: grid; gap: 5px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.event-meta b { color: var(--ink); margin-right: 4px; }
+.event-empty { margin: 0; padding: 0 14px 14px; color: var(--muted); font-size: 12px; }
 footer { width: min(1040px, calc(100% - 32px)); margin: 0 auto 30px; color: #a09caf; text-align: center; font-size: 12px; }
 
 @media (max-width: 680px) {
@@ -104,4 +115,5 @@ footer { width: min(1040px, calc(100% - 32px)); margin: 0 auto 30px; color: #a09
   .copy-row { grid-template-columns: 1fr; }
   .actions .button, .audit-head .button { text-align: center; }
   nav a { padding: 8px; font-size: 13px; }
+  .event-main { align-items: flex-start; flex-direction: column; gap: 4px; }
 }

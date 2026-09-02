@@ -19,7 +19,19 @@ export function createStore(filename, secretKey) {
       revealed_at INTEGER,
       deleted_at INTEGER
     );
+    CREATE TABLE IF NOT EXISTS secret_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      secret_id TEXT NOT NULL REFERENCES secrets(id) ON DELETE CASCADE,
+      event_type TEXT NOT NULL,
+      occurred_at INTEGER NOT NULL,
+      ip_address TEXT,
+      user_agent TEXT,
+      accept_language TEXT,
+      referrer_origin TEXT
+    );
     CREATE INDEX IF NOT EXISTS secrets_created_at_idx ON secrets(created_at DESC);
+    CREATE INDEX IF NOT EXISTS secret_events_secret_id_idx
+      ON secret_events(secret_id, occurred_at ASC);
   `);
 
   const insert = db.prepare(`
@@ -65,6 +77,37 @@ export function createStore(filename, secretKey) {
      ORDER BY created_at DESC
      LIMIT ?
   `);
+  const insertEvent = db.prepare(`
+    INSERT INTO secret_events (
+      secret_id, event_type, occurred_at, ip_address, user_agent, accept_language, referrer_origin
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  const eventCount = db.prepare(`
+    SELECT COUNT(*) AS count
+      FROM secret_events
+     WHERE secret_id = ? AND event_type = ?
+  `);
+  const eventsBySecret = db.prepare(`
+    SELECT event_type, occurred_at, ip_address, user_agent, accept_language, referrer_origin
+      FROM secret_events
+     WHERE secret_id = ?
+     ORDER BY occurred_at ASC, id ASC
+  `);
+
+  function recordEvent(secretId, eventType, occurredAt, metadata = {}) {
+    const limit = eventType === 'requested' ? 100 : 10;
+    if (eventCount.get(secretId, eventType).count >= limit) return false;
+    insertEvent.run(
+      secretId,
+      eventType,
+      occurredAt,
+      metadata.ipAddress ?? null,
+      metadata.userAgent ?? null,
+      metadata.acceptLanguage ?? null,
+      metadata.referrerOrigin ?? null,
+    );
+    return true;
+  }
 
   function getState(record, now) {
     if (!record) return 'missing';
@@ -75,7 +118,7 @@ export function createStore(filename, secretKey) {
   }
 
   return {
-    create({ id, token, burnToken, plaintext, createdAt, expiresAt }) {
+    create({ id, token, burnToken, plaintext, createdAt, expiresAt, metadata }) {
       const encrypted = encryptSecret(plaintext, secretKey);
       insert.run(
         id,
@@ -87,6 +130,7 @@ export function createStore(filename, secretKey) {
         createdAt,
         expiresAt,
       );
+      recordEvent(id, 'created', createdAt, metadata);
     },
 
     inspect(token, now) {
@@ -99,7 +143,11 @@ export function createStore(filename, secretKey) {
       return record ? { ...record, state: getState(record, now) } : null;
     },
 
-    reveal(token, now) {
+    recordRequest(id, now, metadata) {
+      return recordEvent(id, 'requested', now, metadata);
+    },
+
+    reveal(token, now, metadata) {
       db.exec('BEGIN IMMEDIATE');
       try {
         const tokenHash = hashToken(token);
@@ -114,6 +162,7 @@ export function createStore(filename, secretKey) {
           db.exec('ROLLBACK');
           return null;
         }
+        recordEvent(record.id, 'revealed', now, metadata);
         db.exec('COMMIT');
         return plaintext;
       } catch (error) {
@@ -122,12 +171,17 @@ export function createStore(filename, secretKey) {
       }
     },
 
-    burn(burnToken, now) {
-      return burn.run(now, hashToken(burnToken), now).changes === 1;
+    burn(burnToken, now, metadata) {
+      const record = byBurn.get(hashToken(burnToken));
+      const changed = burn.run(now, hashToken(burnToken), now).changes === 1;
+      if (changed) recordEvent(record.id, 'deleted', now, metadata);
+      return changed;
     },
 
-    adminBurn(id, now) {
-      return adminBurn.run(now, id, now).changes === 1;
+    adminBurn(id, now, metadata) {
+      const changed = adminBurn.run(now, id, now).changes === 1;
+      if (changed) recordEvent(id, 'deleted', now, metadata);
+      return changed;
     },
 
     purgeExpired(now) {
@@ -135,7 +189,10 @@ export function createStore(filename, secretKey) {
     },
 
     list(limit = 200) {
-      return list.all(limit);
+      return list.all(limit).map((record) => ({
+        ...record,
+        events: eventsBySecret.all(record.id),
+      }));
     },
 
     close() {

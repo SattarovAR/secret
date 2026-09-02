@@ -6,6 +6,13 @@ const statusLabels = {
   missing: ['Не найдена', 'status-deleted'],
 };
 
+const eventLabels = {
+  created: 'Создана',
+  requested: 'Страница запрошена',
+  revealed: 'Секрет раскрыт',
+  deleted: 'Удалена',
+};
+
 export function escapeHtml(value) {
   return String(value)
     .replaceAll('&', '&amp;')
@@ -184,6 +191,16 @@ export function auditView({ records, now, formatDate, message }) {
     const state = record.revealed_at ? 'revealed'
       : record.deleted_at ? 'deleted'
         : record.expires_at <= now ? 'expired' : 'active';
+    const events = record.events ?? [];
+    const eventItems = events.map((event) => `<li>
+      <div class="event-main"><strong>${escapeHtml(eventLabels[event.event_type] ?? event.event_type)}</strong>${date(event.occurred_at, formatDate)}</div>
+      <div class="event-meta">
+        <span><b>IP</b> <code>${escapeHtml(event.ip_address ?? 'не определён')}</code></span>
+        <span><b>User-Agent</b> ${escapeHtml(event.user_agent ?? 'не передан')}</span>
+        ${event.accept_language ? `<span><b>Язык</b> ${escapeHtml(event.accept_language)}</span>` : ''}
+        ${event.referrer_origin ? `<span><b>Источник</b> ${escapeHtml(event.referrer_origin)}</span>` : ''}
+      </div>
+    </li>`).join('');
     return `<tr>
       <td><code>${escapeHtml(record.id)}</code></td>
       <td>${statusBadge(state)}</td>
@@ -191,7 +208,13 @@ export function auditView({ records, now, formatDate, message }) {
       <td>${date(record.revealed_at, formatDate)}</td>
       <td>${date(record.expires_at, formatDate)}</td>
       <td>${state === 'active' ? `<form action="/audit/${escapeHtml(record.id)}/delete" method="post"><button class="small danger" type="submit">Удалить</button></form>` : '—'}</td>
-    </tr>`;
+    </tr>
+    <tr class="events-row"><td colspan="6">
+      <details class="event-details">
+        <summary>Технический журнал · ${events.length}</summary>
+        ${eventItems ? `<ol class="event-list">${eventItems}</ol>` : '<p class="event-empty">События не записаны: ссылка создана до включения расширенного аудита.</p>'}
+      </details>
+    </td></tr>`;
   }).join('');
 
   return layout({
@@ -199,7 +222,7 @@ export function auditView({ records, now, formatDate, message }) {
     navigation: true,
     body: `
       <section class="audit-head">
-        <div><div class="eyebrow">ЖУРНАЛ</div><h1>Аудит ссылок</h1><p>Только даты и состояния — содержимое секретов здесь никогда не хранится.</p></div>
+        <div><div class="eyebrow">ЖУРНАЛ</div><h1>Аудит ссылок</h1><p>События, IP и данные браузера — содержимое секретов здесь никогда не хранится.</p></div>
         <a class="button" href="/">+ Новый секрет</a>
       </section>
       ${message ? `<div class="notice page-notice">${escapeHtml(message)}</div>` : ''}

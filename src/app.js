@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { isIP } from 'node:net';
 import { createToken } from './crypto.js';
 import {
   auditView,
@@ -67,6 +68,36 @@ function sanitizeMessage(value) {
   return typeof value === 'string' ? value.slice(0, 160) : '';
 }
 
+function cleanHeader(value, maxLength) {
+  const first = Array.isArray(value) ? value[0] : value;
+  if (typeof first !== 'string') return null;
+  return first.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, maxLength) || null;
+}
+
+function requestMetadata(request) {
+  const forwardedFor = cleanHeader(request.headers['x-forwarded-for'], 512);
+  const forwardedIp = forwardedFor?.split(',').at(-1)?.trim();
+  const realIp = cleanHeader(request.headers['x-real-ip'], 64);
+  const remoteIp = request.socket?.remoteAddress?.replace(/^::ffff:/, '');
+  const ipCandidate = realIp ?? forwardedIp ?? remoteIp;
+  const ipAddress = ipCandidate && isIP(ipCandidate) ? ipCandidate : null;
+  const referrer = cleanHeader(request.headers.referer, 1024);
+  let referrerOrigin = null;
+  if (referrer) {
+    try {
+      referrerOrigin = new URL(referrer).origin.slice(0, 255);
+    } catch {
+      // Ignore malformed referrers instead of storing untrusted free-form input.
+    }
+  }
+  return {
+    ipAddress,
+    userAgent: cleanHeader(request.headers['user-agent'], 512),
+    acceptLanguage: cleanHeader(request.headers['accept-language'], 160),
+    referrerOrigin,
+  };
+}
+
 export function createApp({
   store,
   publicUrl,
@@ -113,6 +144,7 @@ export function createApp({
     try {
       const url = new URL(request.url, 'http://localhost');
       const pathname = decodeURIComponent(url.pathname);
+      const metadata = requestMetadata(request);
 
       if (request.method === 'POST') {
         const fetchSite = request.headers['sec-fetch-site'];
@@ -169,6 +201,7 @@ export function createApp({
           plaintext,
           createdAt: currentTime,
           expiresAt,
+          metadata,
         });
         return send(response, 201, createdView({
           shareUrl: `${baseUrl}/s/${token}`,
@@ -182,6 +215,7 @@ export function createApp({
       if (request.method === 'GET' && secretMatch) {
         const token = secretMatch[1];
         const record = store.inspect(token, currentTime);
+        if (record) store.recordRequest(record.id, currentTime, metadata);
         if (!record || record.state !== 'active') {
           return send(response, 410, unavailableView(record?.state ?? 'missing'));
         }
@@ -191,7 +225,7 @@ export function createApp({
       const revealMatch = pathname.match(/^\/s\/([A-Za-z0-9_-]{40,60})\/reveal$/);
       if (request.method === 'POST' && revealMatch) {
         const token = revealMatch[1];
-        const plaintext = store.reveal(token, currentTime);
+        const plaintext = store.reveal(token, currentTime, metadata);
         if (plaintext === null) {
           const record = store.inspect(token, currentTime);
           return send(response, 410, unavailableView(record?.state ?? 'missing'));
@@ -213,7 +247,7 @@ export function createApp({
       const burnMatch = pathname.match(/^\/manage\/([A-Za-z0-9_-]{40,60})\/delete$/);
       if (request.method === 'POST' && burnMatch) {
         if (!requireAdmin(request, response)) return;
-        const burned = store.burn(burnMatch[1], currentTime);
+        const burned = store.burn(burnMatch[1], currentTime, metadata);
         const message = burned ? 'Секрет удалён. Ссылка получателя больше не работает.' : 'Секрет уже недоступен.';
         return redirect(response, `/manage/${burnMatch[1]}?message=${encodeURIComponent(message)}`);
       }
@@ -231,7 +265,7 @@ export function createApp({
       const auditDeleteMatch = pathname.match(/^\/audit\/([A-Za-z0-9_-]{12})\/delete$/);
       if (request.method === 'POST' && auditDeleteMatch) {
         if (!requireAdmin(request, response)) return;
-        const burned = store.adminBurn(auditDeleteMatch[1], currentTime);
+        const burned = store.adminBurn(auditDeleteMatch[1], currentTime, metadata);
         const message = burned ? 'Активная ссылка удалена.' : 'Ссылка уже недоступна.';
         return redirect(response, `/audit?message=${encodeURIComponent(message)}`);
       }
