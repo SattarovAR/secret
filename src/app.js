@@ -20,7 +20,7 @@ export const TTL_OPTIONS = [
   { value: 604800, label: '7 дней' },
 ];
 
-const MAX_BODY_SIZE = 40 * 1024;
+const MAX_BODY_SIZE = 512 * 1024;
 
 function digest(value) {
   return createHash('sha256').update(value).digest();
@@ -43,7 +43,11 @@ async function readForm(request) {
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > MAX_BODY_SIZE) throw new Error('Секрет слишком большой');
+    if (size > MAX_BODY_SIZE) {
+      const error = new Error('Секрет слишком большой');
+      error.statusCode = 413;
+      throw error;
+    }
     chunks.push(chunk);
   }
   return new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
@@ -83,6 +87,7 @@ export function createApp({
     timeZone,
   });
   const formatDate = (value) => formatter.format(new Date(value));
+  const expectedOrigin = new URL(baseUrl).origin;
 
   function requireAdmin(request, response) {
     if (credentialsMatch(request, adminUsername, adminPassword)) return true;
@@ -108,6 +113,14 @@ export function createApp({
     try {
       const url = new URL(request.url, 'http://localhost');
       const pathname = decodeURIComponent(url.pathname);
+
+      if (request.method === 'POST') {
+        const fetchSite = request.headers['sec-fetch-site'];
+        const origin = request.headers.origin;
+        if (fetchSite === 'cross-site' || (origin && new URL(origin).origin !== expectedOrigin)) {
+          return send(response, 403, errorView('Запрос с другого сайта заблокирован.'));
+        }
+      }
 
       if (request.method === 'GET' && pathname === '/style.css') {
         response.setHeader('Cache-Control', 'public, max-age=3600');
@@ -217,6 +230,9 @@ export function createApp({
       return send(response, 404, unavailableView('missing'));
     } catch (error) {
       console.error('Request failed:', error.message);
+      if (error.statusCode === 413) {
+        return send(response, 413, errorView('Максимальный размер секрета — 32 768 символов.'));
+      }
       return send(response, 500, errorView('Внутренняя ошибка. Попробуйте ещё раз.'));
     }
   };

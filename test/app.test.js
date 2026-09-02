@@ -63,6 +63,17 @@ test('creation and audit require administrator credentials', async () => {
 
   const audit = await fetch(`${origin}/audit`, { headers: { Authorization: auth } });
   assert.equal(audit.status, 200);
+
+  const crossSite = await fetch(`${origin}/create`, {
+    method: 'POST',
+    headers: {
+      Authorization: auth,
+      Origin: 'https://attacker.example',
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({ secret: 'must not be stored', ttl: '3600' }),
+  });
+  assert.equal(crossSite.status, 403);
 });
 
 test('a secret is revealed exactly once and audit records the read', async () => {

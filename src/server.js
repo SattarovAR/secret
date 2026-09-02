@@ -7,6 +7,7 @@ import { parseSecretKey } from './crypto.js';
 import { createStore } from './store.js';
 
 const sourceDir = fileURLToPath(new URL('.', import.meta.url));
+process.umask(0o077);
 const port = Number(process.env.PORT ?? 3000);
 const dataDir = process.env.DATA_DIR ?? './data';
 const publicUrl = process.env.PUBLIC_URL;
