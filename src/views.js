@@ -40,7 +40,7 @@ function layout({ title, body, navigation = false }) {
     <a class="brand" href="/" aria-label="Secret Spark">
       <span class="brand-mark">✦</span><span>Secret Spark</span>
     </a>
-    ${navigation ? '<nav><a href="/">Создать</a><a href="/audit">Аудит</a></nav>' : ''}
+    ${navigation ? '<nav><a href="/">Создать</a><a href="/security">Безопасность</a><a href="/audit">Аудит</a></nav>' : ''}
   </header>
   <main>${body}</main>
   <footer>Секрет исчезает, метаданные остаются ✨</footer>
@@ -232,6 +232,107 @@ export function auditView({ records, now, formatDate, message }) {
           <tbody>${rows}</tbody>
         </table></div>` : '<div class="empty-table">Пока ни одной ссылки. Самое время создать первую ✦</div>'}
       </section>`,
+  });
+}
+
+export function securityView() {
+  return layout({
+    title: 'Как защищены секреты',
+    navigation: true,
+    body: `
+      <article class="security-page">
+        <section class="security-hero">
+          <div class="eyebrow">БЕЗОПАСНОСТЬ БЕЗ МАГИИ</div>
+          <h1>Что происходит<br><span>с секретом</span></h1>
+          <p>Техническое описание жизненного цикла Secret Spark: где находятся данные, как они передаются и что остаётся после единственного чтения.</p>
+          <div class="security-pills">
+            <span>1 успешное раскрытие</span><span>AES-256-GCM</span><span>HTTPS</span><span>TTL 15 минут — 7 дней</span>
+          </div>
+        </section>
+
+        <section class="security-callout good">
+          <b>Короткий ответ</b>
+          <p>Секрет хранится на нашем VPS только в зашифрованном виде. Обычное открытие ссылки показывает кнопку и не расходует секрет. Первый успешный POST «Показать секрет» расшифровывает его, отправляет получателю и удаляет шифротекст из активной записи. Настройки нескольких просмотров нет.</p>
+        </section>
+
+        <section class="security-section">
+          <div class="section-heading"><span>01</span><div><h2>Жизненный цикл</h2><p>От формы создателя до необратимого завершения.</p></div></div>
+          <ol class="lifecycle">
+            <li><b>Создание</b><p>Браузер отправляет текст методом POST по HTTPS. Node.js кратковременно получает открытый текст в памяти процесса.</p></li>
+            <li><b>Шифрование</b><p>Для каждой записи создаётся случайный 12-байтовый IV. Текст шифруется AES-256-GCM; отдельно сохраняется authentication tag.</p></li>
+            <li><b>Ожидание</b><p>В SQLite лежат ciphertext, IV и tag. Сырой токен ссылки в базе не хранится — только его SHA-256-хеш.</p></li>
+            <li><b>Запрос страницы</b><p>GET по ссылке возвращает лишь экран подтверждения. Telegram-превью тоже делает GET, поэтому само по себе секрет не раскрывает.</p></li>
+            <li><b>Единственное чтение</b><p>POST выполняется в блокирующей транзакции SQLite. Только один конкурентный запрос может успешно получить текст.</p></li>
+            <li><b>Завершение</b><p>После чтения, ручного удаления или TTL поля ciphertext, IV и tag становятся NULL. Метаданные аудита остаются.</p></li>
+          </ol>
+        </section>
+
+        <section class="security-section">
+          <div class="section-heading"><span>02</span><div><h2>Как данные идут по сети</h2><p>Граница TLS и видимость каждого участка.</p></div></div>
+          <div class="network-flow" aria-label="Схема передачи данных">
+            <div><i>①</i><b>Браузер</b><small>Открытый текст внутри устройства</small></div>
+            <em>HTTPS / TLS</em>
+            <div><i>②</i><b>nginx</b><small>TLS завершается на нашем VPS</small></div>
+            <em>HTTP / Docker network</em>
+            <div><i>③</i><b>Node.js</b><small>Шифрование и одноразовая выдача</small></div>
+            <em>AES-256-GCM</em>
+            <div><i>④</i><b>SQLite</b><small>Зашифрованное содержимое</small></div>
+          </div>
+          <div class="security-grid two">
+            <div class="security-card"><h3>Интернет-участок</h3><p>Трафик между браузером и nginx защищён сертификатом Let’s Encrypt. Провайдер видит соединение с сервером и домен, но не тело секрета и не путь URL внутри HTTPS.</p></div>
+            <div class="security-card"><h3>Внутри VPS</h3><p>После TLS nginx передаёт запрос приложению по HTTP через Docker-сеть <code>proxy-net</code>. Порт приложения не опубликован в интернет, но администратор или компрометация VPS остаются в доверенной границе.</p></div>
+          </div>
+        </section>
+
+        <section class="security-section">
+          <div class="section-heading"><span>03</span><div><h2>Где и как оседают данные</h2><p>Секрет и следы ссылки — не одно и то же.</p></div></div>
+          <div class="storage-table">
+            <div class="storage-head"><b>Данные</b><b>Где</b><b>Сколько живут</b></div>
+            <div><strong>Открытый секрет</strong><span>Память браузера и Node.js во время запроса/ответа</span><span>До завершения обработки; после показа остаётся на стороне получателя</span></div>
+            <div><strong>Зашифрованный секрет</strong><span><code>secrets.sqlite</code> в Docker volume, возможен SQLite WAL/backup</span><span>До первого чтения, удаления или истечения TTL</span></div>
+            <div><strong>Ключ AES</strong><span><code>/root/secret/.env</code> с правами 0600 и environment контейнера</span><span>Пока эксплуатируется установка</span></div>
+            <div><strong>Токены ссылок</strong><span>Полный токен — в URL; в SQLite только SHA-256-хеш</span><span>URL может остаться в чате, истории браузера и nginx access-log</span></div>
+            <div><strong>Метаданные</strong><span>SQLite: даты, статус, IP, User-Agent, язык, origin источника</span><span>После исчезновения секрета остаются для аудита</span></div>
+          </div>
+          <div class="security-callout warn"><b>Важный нюанс журналов</b><p>Тело секрета nginx не журналирует, но текущий access-log содержит полный путь запроса, включая одноразовый токен. Поэтому доступ к логам VPS равнозначен доступу к ещё активным ссылкам. Встроенный аудит хранит только ID записи и хеш токена.</p></div>
+        </section>
+
+        <section class="security-section">
+          <div class="section-heading"><span>04</span><div><h2>Ровно одно чтение</h2><p>Это не счётчик просмотров, а смена состояния.</p></div></div>
+          <div class="once-diagram">
+            <div class="state active-state"><b>ACTIVE</b><span>ciphertext присутствует</span></div>
+            <div class="arrow">первый успешный POST →</div>
+            <div class="state done-state"><b>REVEALED</b><span>ciphertext = NULL</span></div>
+          </div>
+          <p class="security-note">Если два человека нажмут кнопку одновременно, SQLite выполняет операции последовательно: первый получает секрет, второй — страницу «уже прочитан». Установить два или больше просмотров нельзя.</p>
+        </section>
+
+        <section class="security-section">
+          <div class="section-heading"><span>05</span><div><h2>Что остаётся в аудите</h2><p>Технические признаки, но не содержимое.</p></div></div>
+          <div class="security-grid four">
+            <div class="mini-card"><b>Создана</b><span>время и клиент создателя</span></div>
+            <div class="mini-card"><b>Запрошена</b><span>каждый GET, включая preview</span></div>
+            <div class="mini-card"><b>Раскрыта</b><span>успешный POST получателя</span></div>
+            <div class="mini-card"><b>Удалена</b><span>действие администратора</span></div>
+          </div>
+          <p class="security-note">Записываются IP, User-Agent, Accept-Language и только origin Referer без пути. До 100 событий запроса на ссылку. Эти признаки помогают расследованию, но не доказывают личность человека.</p>
+        </section>
+
+        <section class="security-section threat-section">
+          <div class="section-heading"><span>06</span><div><h2>Границы защиты</h2><p>От каких рисков система не обещает защитить.</p></div></div>
+          <div class="security-grid two">
+            <div class="security-card risk"><h3>Ссылка — это ключ доступа</h3><p>Любой, кто получил URL, может первым раскрыть секрет. Пересылка, скриншот или утечка истории браузера передают это право другому человеку.</p></div>
+            <div class="security-card risk"><h3>Это не end-to-end encryption</h3><p>VPS содержит и ключ AES, и базу. Root-доступ, вредоносный код в приложении или компрометация хоста позволяют получить активные секреты.</p></div>
+            <div class="security-card risk"><h3>Публичное создание</h3><p>Создавать ссылки можно без авторизации. Сейчас нет CAPTCHA и rate limit, поэтому возможны спам и расход диска; размер одного секрета ограничен 32 768 символами.</p></div>
+            <div class="security-card risk"><h3>Получатель отвечает за копию</h3><p>После показа текст находится в DOM и памяти его браузера. Буфер обмена, скриншоты, расширения и заражённое устройство сервис контролировать не может.</p></div>
+          </div>
+        </section>
+
+        <section class="security-summary">
+          <div><span>Подходит</span><b>Для временной передачи паролей, ключей и приватных заметок вместо открытого текста в чате.</b></div>
+          <div><span>Не заменяет</span><b>Корпоративный password manager, управление доступами, E2E-канал и защищённое устройство получателя.</b></div>
+        </section>
+      </article>`,
   });
 }
 

@@ -60,6 +60,13 @@ test('creation is public while audit remains administrator-only', async () => {
   const home = await fetch(`${origin}/`);
   assert.equal(home.status, 200);
 
+  const security = await fetch(`${origin}/security`);
+  assert.equal(security.status, 200);
+  const securityHtml = await security.text();
+  assert.match(securityHtml, /AES-256-GCM/);
+  assert.match(securityHtml, /Ровно одно чтение/);
+  assert.match(securityHtml, /не end-to-end encryption/);
+
   const publicCreation = await fetch(`${origin}/create`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },

@@ -8,6 +8,7 @@ import {
   homeView,
   manageView,
   revealView,
+  securityView,
   secretView,
   unavailableView,
 } from './views.js';
@@ -176,6 +177,10 @@ export function createApp({
 
       if (request.method === 'GET' && pathname === '/robots.txt') {
         return send(response, 200, 'User-agent: *\nDisallow: /\n', 'text/plain; charset=utf-8');
+      }
+
+      if (request.method === 'GET' && (pathname === '/security' || pathname === '/security.html')) {
+        return send(response, 200, securityView());
       }
 
       if (request.method === 'GET' && pathname === '/') {
