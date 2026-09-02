@@ -1,0 +1,115 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, before, test } from 'node:test';
+import { createApp } from '../src/app.js';
+import { createStore } from '../src/store.js';
+
+const username = 'team';
+const password = 'correct-horse-battery-staple';
+const auth = `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
+const workingDir = mkdtempSync(join(tmpdir(), 'secret-spark-'));
+const store = createStore(join(workingDir, 'test.sqlite'), Buffer.alloc(32, 7));
+let clock = Date.UTC(2026, 8, 2, 9, 0, 0);
+let server;
+let origin;
+
+before(async () => {
+  const stylesheet = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8');
+  const handler = createApp({
+    store,
+    publicUrl: 'https://secret.example.test',
+    adminUsername: username,
+    adminPassword: password,
+    timeZone: 'Europe/Moscow',
+    now: () => clock,
+    stylesheet,
+  });
+  server = createServer(handler);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  origin = `http://127.0.0.1:${server.address().port}`;
+});
+
+after(async () => {
+  await new Promise((resolve) => server.close(resolve));
+  store.close();
+  rmSync(workingDir, { recursive: true, force: true });
+});
+
+async function createSecret(value, ttl = 86400) {
+  const response = await fetch(`${origin}/create`, {
+    method: 'POST',
+    headers: {
+      Authorization: auth,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({ secret: value, ttl: String(ttl) }),
+  });
+  assert.equal(response.status, 201);
+  const html = await response.text();
+  const secretPath = html.match(/https:\/\/secret\.example\.test(\/s\/[A-Za-z0-9_-]+)/)?.[1];
+  const managePath = html.match(/https:\/\/secret\.example\.test(\/manage\/[A-Za-z0-9_-]+)/)?.[1];
+  assert.ok(secretPath, 'secret link must be present');
+  assert.ok(managePath, 'management link must be present');
+  return { secretPath, managePath };
+}
+
+test('creation and audit require administrator credentials', async () => {
+  const home = await fetch(`${origin}/`);
+  assert.equal(home.status, 401);
+  assert.match(home.headers.get('www-authenticate'), /Secret Spark/);
+
+  const audit = await fetch(`${origin}/audit`, { headers: { Authorization: auth } });
+  assert.equal(audit.status, 200);
+});
+
+test('a secret is revealed exactly once and audit records the read', async () => {
+  const secretText = 'temporary API key: test-only-value';
+  const { secretPath } = await createSecret(secretText);
+
+  const preview = await fetch(`${origin}${secretPath}`);
+  assert.equal(preview.status, 200);
+  const previewHtml = await preview.text();
+  assert.match(previewHtml, /Показать секрет/);
+  assert.doesNotMatch(previewHtml, /test-only-value/);
+
+  const first = await fetch(`${origin}${secretPath}/reveal`, { method: 'POST' });
+  assert.equal(first.status, 200);
+  assert.match(await first.text(), /test-only-value/);
+
+  const second = await fetch(`${origin}${secretPath}/reveal`, { method: 'POST' });
+  assert.equal(second.status, 410);
+  assert.doesNotMatch(await second.text(), /test-only-value/);
+
+  const audit = await fetch(`${origin}/audit`, { headers: { Authorization: auth } });
+  const auditHtml = await audit.text();
+  assert.match(auditHtml, /Прочитана/);
+  assert.match(auditHtml, /2 сент. 2026/);
+});
+
+test('an active secret can be deleted before it is read', async () => {
+  const { secretPath, managePath } = await createSecret('delete me');
+  const deletion = await fetch(`${origin}${managePath}/delete`, {
+    method: 'POST',
+    redirect: 'manual',
+  });
+  assert.equal(deletion.status, 303);
+
+  const secret = await fetch(`${origin}${secretPath}`);
+  assert.equal(secret.status, 410);
+  assert.match(await secret.text(), /Ссылка отозвана/);
+});
+
+test('an unread secret expires and its content becomes unavailable', async () => {
+  const { secretPath } = await createSecret('short lived', 900);
+  clock += 901_000;
+
+  const secret = await fetch(`${origin}${secretPath}`);
+  assert.equal(secret.status, 410);
+  assert.match(await secret.text(), /Время вышло/);
+
+  const audit = await fetch(`${origin}/audit`, { headers: { Authorization: auth } });
+  assert.match(await audit.text(), /Истекла/);
+});

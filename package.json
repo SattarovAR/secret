@@ -1,0 +1,14 @@
+{
+  "name": "secret-spark",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Minimal self-hosted one-time secret sharing for small teams",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test --test-force-exit --test-isolation=none test/app.test.js"
+  }
+}
