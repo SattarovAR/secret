@@ -147,12 +147,10 @@ export function createApp({
       }
 
       if (request.method === 'GET' && pathname === '/') {
-        if (!requireAdmin(request, response)) return;
         return send(response, 200, homeView({ ttlOptions: TTL_OPTIONS, defaultTtl }));
       }
 
       if (request.method === 'POST' && pathname === '/create') {
-        if (!requireAdmin(request, response)) return;
         const form = await readForm(request);
         const plaintext = form.get('secret')?.trim() ?? '';
         const requestedTtl = Number(form.get('ttl'));
@@ -214,6 +212,7 @@ export function createApp({
 
       const burnMatch = pathname.match(/^\/manage\/([A-Za-z0-9_-]{40,60})\/delete$/);
       if (request.method === 'POST' && burnMatch) {
+        if (!requireAdmin(request, response)) return;
         const burned = store.burn(burnMatch[1], currentTime);
         const message = burned ? 'Секрет удалён. Ссылка получателя больше не работает.' : 'Секрет уже недоступен.';
         return redirect(response, `/manage/${burnMatch[1]}?message=${encodeURIComponent(message)}`);

@@ -42,7 +42,6 @@ async function createSecret(value, ttl = 86400) {
   const response = await fetch(`${origin}/create`, {
     method: 'POST',
     headers: {
-      Authorization: auth,
       'Content-Type': 'application/x-www-form-urlencoded',
     },
     body: new URLSearchParams({ secret: value, ttl: String(ttl) }),
@@ -56,10 +55,20 @@ async function createSecret(value, ttl = 86400) {
   return { secretPath, managePath };
 }
 
-test('creation and audit require administrator credentials', async () => {
+test('creation is public while audit remains administrator-only', async () => {
   const home = await fetch(`${origin}/`);
-  assert.equal(home.status, 401);
-  assert.match(home.headers.get('www-authenticate'), /Secret Spark/);
+  assert.equal(home.status, 200);
+
+  const publicCreation = await fetch(`${origin}/create`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ secret: 'public submission', ttl: '3600' }),
+  });
+  assert.equal(publicCreation.status, 201);
+
+  const anonymousAudit = await fetch(`${origin}/audit`);
+  assert.equal(anonymousAudit.status, 401);
+  assert.match(anonymousAudit.headers.get('www-authenticate'), /Secret Spark/);
 
   const audit = await fetch(`${origin}/audit`, { headers: { Authorization: auth } });
   assert.equal(audit.status, 200);
@@ -125,8 +134,18 @@ test('a secret is revealed exactly once and audit records the read', async () =>
 
 test('an active secret can be deleted before it is read', async () => {
   const { secretPath, managePath } = await createSecret('delete me');
+  const unauthorizedDeletion = await fetch(`${origin}${managePath}/delete`, {
+    method: 'POST',
+    redirect: 'manual',
+  });
+  assert.equal(unauthorizedDeletion.status, 401);
+
+  const stillActive = await fetch(`${origin}${secretPath}`);
+  assert.equal(stillActive.status, 200);
+
   const deletion = await fetch(`${origin}${managePath}/delete`, {
     method: 'POST',
+    headers: { Authorization: auth },
     redirect: 'manual',
   });
   assert.equal(deletion.status, 303);

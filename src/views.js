@@ -101,7 +101,7 @@ export function createdView({ shareUrl, manageUrl, expiresAt, formatDate }) {
         <div class="divider"></div>
         <label for="manage-url">Ссылка управления</label>
         <div class="copy-row"><input id="manage-url" class="url-field" value="${escapeHtml(manageUrl)}" readonly><button class="copy-button" type="button" data-copy="manage-url">Копировать</button></div>
-        <p class="warning">Не отправляйте ссылку управления получателю: с её помощью секрет можно удалить.</p>
+        <p class="warning">Не отправляйте ссылку управления получателю. Для удаления потребуется админ-авторизация.</p>
         <div class="actions"><a class="button secondary" href="/">Создать ещё</a><a class="button" href="${escapeHtml(manageUrl)}">Управление →</a></div>
       </section>`,
   });
@@ -173,7 +173,7 @@ export function manageView({ record, burnToken, formatDate, message }) {
         </dl>
         ${record?.state === 'active' ? `
           <form action="/manage/${escapeHtml(burnToken)}/delete" method="post">
-            <button class="danger wide" type="submit">Удалить секрет сейчас</button>
+            <button class="danger wide" type="submit">Удалить секрет (требуется вход)</button>
           </form>` : ''}
       </section>`,
   });
